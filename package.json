@@ -1,0 +1,45 @@
+{
+  "name": "discord-report-bot",
+  "version": "1.2.0",
+  "description": "Bot Discord com integração ao n8n, Apify e MCP para análise automática de feedbacks e relatórios.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0 <21"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "register": "node src/register-commands.js",
+    "setup": "powershell -ExecutionPolicy Bypass -File scripts/setup.ps1",
+    "mcp": "npx -y @modelcontextprotocol/server-filesystem ./data"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.5",
+    "chalk": "^5.3.0",
+    "dayjs": "^1.11.11",
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.5",
+    "googleapis": "^160.0.0",
+    "mime-types": "^3.0.1",
+    "minisearch": "^7.2.0",
+    "node-fetch": "^3.3.2",
+    "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^5.4.149"
+  },
+  "devDependencies": {
+    "eslint": "^9.12.0",
+    "prettier": "^3.3.3"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "n8n",
+    "apify",
+    "mcp",
+    "feedback",
+    "freefire",
+    "reports"
+  ],
+  "license": "MIT"
+}
