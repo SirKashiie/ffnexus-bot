@@ -8,14 +8,11 @@ import {
   Client, GatewayIntentBits, Partials,
   SlashCommandBuilder, REST, Routes,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  EmbedBuilder, StringSelectMenuBuilder,
-  ModalBuilder, TextInputBuilder, TextInputStyle
+  EmbedBuilder, StringSelectMenuBuilder
 } from 'discord.js';
 
-import { initStore, saveMessage, findMessages } from './storage.js';
-import { summarizeWithN8n } from './n8n.js';
-import { loadKeywordsFromMCP, passesKeywordFilter, isChatter, getNormalized } from './filters.js';
-import { searchDriveDocs, downloadDriveFile } from './drive.js';
+import { initStore } from './storage.js';
+import { loadKeywordsFromMCP } from './filters.js';
 
 // ==== ENV ====
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -25,8 +22,6 @@ const DEST_CHANNEL_ID = process.env.DEST_CHANNEL_ID;
 const SOURCE_CHANNEL_IDS = (process.env.SOURCE_CHANNEL_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const ALLOWED_ROLE_IDS = (process.env.ALLOWED_ROLE_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const TIMEZONE = process.env.TIMEZONE || 'America/Sao_Paulo';
-
-const DOCS_DIR = process.env.DOCS_DIR || './data/docs';
 const DOCS_PROVIDER = process.env.DOCS_PROVIDER || 'local';
 const DIARIO_CONSELHEIRO_CHANNEL_IDS = (process.env.DIARIO_CONSELHEIRO_CHANNEL_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const DIARIO_APRENDIZ_CHANNEL_IDS = (process.env.DIARIO_APRENDIZ_CHANNEL_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -35,7 +30,6 @@ const DIARIO_APRENDIZ_CHANNEL_IDS = (process.env.DIARIO_APRENDIZ_CHANNEL_IDS || 
 const COLOR_RED = 0xE53935;
 const COLOR_YELLOW = 0xFBC02D;
 const COLOR_PURPLE = 0x9C27B0;
-const COLOR_GRAY = 0x2C2F33;
 
 // ==== Cliente Discord ====
 const client = new Client({
@@ -52,23 +46,8 @@ client.once('ready', () => {
   console.log(`📚 Provider de documentos ativo: ${DOCS_PROVIDER}`);
 });
 
-// ==== Helpers ====
-function hasAllowedRole(member) {
-  if (!member) return false;
-  if (!ALLOWED_ROLE_IDS.length) return true;
-  return member.roles.cache.some(r => ALLOWED_ROLE_IDS.includes(r.id));
-}
-
-function withinSourceScope(message) {
-  const isGuildC = DEST_CHANNEL_ID && message.guild?.channels?.cache?.get(DEST_CHANNEL_ID)?.guildId === message.guildId;
-  if (isGuildC) return false;
-  if (SOURCE_CHANNEL_IDS.length > 0) return SOURCE_CHANNEL_IDS.includes(message.channelId);
-  if (GUILD_IDS.length > 0) return GUILD_IDS.includes(message.guildId);
-  return true;
-}
-
 // ===============================================
-// 🌍 Seleção de idioma (PT/EN)
+// 🌍 Traduções
 // ===============================================
 const LANGS = {
   pt: {
@@ -78,8 +57,20 @@ const LANGS = {
     rawMessages: "📜 Mensagens brutas",
     export: "📄 Exportar PDF/Sheets",
     back: "⬅️ Voltar",
-    selectLang: "🗣️ Selecione o idioma",
-    selected: "Idioma definido: Português 🇧🇷"
+    feedbackTitle: "🕒 Gerar relatório de feedback",
+    feedbackDesc: "Escolha o período de mensagens que deseja analisar.",
+    docTitle: "📚 Biblioteca de Documentos",
+    docDesc: "Escolha uma opção:",
+    searchDoc: "🔍 Pesquisar documento",
+    viewList: "📁 Ver lista completa",
+    diarioActions: "O que deseja fazer?",
+    lastHours: "🕒 Últimas horas",
+    today: "📅 Mensagens do dia",
+    search: "🔍 Buscar palavra",
+    last100: "🧾 Selecionar últimas 100",
+    selectLang: "🗣️ Selecione o idioma / Select language",
+    langPT: "🇧🇷 Português",
+    langEN: "🇺🇸 English"
   },
   en: {
     confirm: "✅ Confirm",
@@ -88,36 +79,45 @@ const LANGS = {
     rawMessages: "📜 Raw Messages",
     export: "📄 Export PDF/Sheets",
     back: "⬅️ Back",
+    feedbackTitle: "🕒 Generate feedback report",
+    feedbackDesc: "Choose the message period to analyze.",
+    docTitle: "📚 Document Library",
+    docDesc: "Choose an option:",
+    searchDoc: "🔍 Search document",
+    viewList: "📁 View full list",
+    diarioActions: "What do you want to do?",
+    lastHours: "🕒 Last hours",
+    today: "📅 Today’s messages",
+    search: "🔍 Search keyword",
+    last100: "🧾 Select last 100",
     selectLang: "🗣️ Select your language",
-    selected: "Language set: English 🇺🇸"
+    langPT: "🇧🇷 Portuguese",
+    langEN: "🇺🇸 English"
   }
 };
 
 // ===============================================
-// /feedback — IA + Export + Bruto
+// /feedback
 // ===============================================
 async function handleFeedbackCommand(interaction, lang = 'pt') {
-  await interaction.deferReply({ ephemeral: true });
-
   const L = LANGS[lang];
+  await interaction.deferReply({ ephemeral: true, fetchReply: true });
 
   const select = new StringSelectMenuBuilder()
     .setCustomId('fb-time')
     .setPlaceholder(lang === 'pt' ? 'Selecione a janela de tempo' : 'Select time range')
     .addOptions([
-      { label: 'Última 1h / Last 1h', value: '3600000' },
-      { label: 'Últimas 3h / Last 3h', value: '10800000' },
-      { label: 'Últimas 6h / Last 6h', value: '21600000' },
-      { label: 'Últimas 12h / Last 12h', value: '43200000' },
-      { label: 'Últimas 24h / Last 24h', value: '86400000' },
+      { label: lang === 'pt' ? 'Última 1h' : 'Last 1h', value: '3600000' },
+      { label: lang === 'pt' ? 'Últimas 3h' : 'Last 3h', value: '10800000' },
+      { label: lang === 'pt' ? 'Últimas 6h' : 'Last 6h', value: '21600000' },
+      { label: lang === 'pt' ? 'Últimas 12h' : 'Last 12h', value: '43200000' },
+      { label: lang === 'pt' ? 'Últimas 24h' : 'Last 24h', value: '86400000' },
     ]);
 
   const embed = new EmbedBuilder()
     .setColor(COLOR_RED)
-    .setTitle(lang === 'pt' ? '🕒 Gerar relatório de feedback' : '🕒 Generate feedback report')
-    .setDescription(lang === 'pt'
-      ? 'Escolha o período de mensagens que deseja analisar.'
-      : 'Choose the message period to analyze.')
+    .setTitle(L.feedbackTitle)
+    .setDescription(L.feedbackDesc)
     .setFooter({ text: 'FFNexus • Garena BR' });
 
   await interaction.editReply({
@@ -127,23 +127,21 @@ async function handleFeedbackCommand(interaction, lang = 'pt') {
 }
 
 // ===============================================
-// /doc — IA + Download + Bruto + Export
+// /doc
 // ===============================================
 async function handleDocCommand(interaction, lang = 'pt') {
-  await interaction.deferReply({ ephemeral: true });
   const L = LANGS[lang];
+  await interaction.deferReply({ ephemeral: true, fetchReply: true });
 
   const embed = new EmbedBuilder()
     .setColor(COLOR_YELLOW)
-    .setTitle(lang === 'pt' ? '📚 Biblioteca de Documentos' : '📚 Document Library')
-    .setDescription(lang === 'pt'
-      ? 'Escolha uma opção:\n\n🔍 Pesquisar documento\n📁 Ver lista completa'
-      : 'Choose an option:\n\n🔍 Search document\n📁 View full list')
+    .setTitle(L.docTitle)
+    .setDescription(`${L.docDesc}\n\n${L.searchDoc}\n${L.viewList}`)
     .setFooter({ text: 'FFNexus • Garena BR' });
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('doc-search').setLabel('🔍 Pesquisar / Search').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('doc-list').setLabel('📁 Ver lista / View list').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('doc-search').setLabel(L.searchDoc).setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('doc-list').setLabel(L.viewList).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('doc-cancel').setLabel(L.cancel).setStyle(ButtonStyle.Danger)
   );
 
@@ -153,23 +151,21 @@ async function handleDocCommand(interaction, lang = 'pt') {
 // ===============================================
 // /diario_aprendiz & /diario_conselheiro
 // ===============================================
-async function handleDiarioCommand(interaction, channels, titulo, color, lang = 'pt') {
-  await interaction.deferReply({ ephemeral: true });
+async function handleDiarioCommand(interaction, titulo, color, lang = 'pt') {
   const L = LANGS[lang];
+  await interaction.deferReply({ ephemeral: true, fetchReply: true });
 
   const embed = new EmbedBuilder()
     .setColor(color)
-    .setTitle(lang === 'pt' ? `📘 ${titulo}` : `📘 ${titulo} (English)`)
-    .setDescription(lang === 'pt'
-      ? 'O que deseja fazer?\n\n🕒 Últimas horas\n📅 Mensagens do dia\n🔍 Buscar palavra\n🧾 Selecionar últimas 100\n❌ Cancelar'
-      : 'What do you want to do?\n\n🕒 Last hours\n📅 Today\'s messages\n🔍 Search keyword\n🧾 Select last 100\n❌ Cancel')
+    .setTitle(`📘 ${titulo}`)
+    .setDescription(`${L.diarioActions}\n\n${L.lastHours}\n${L.today}\n${L.search}\n${L.last100}\n${L.cancel}`)
     .setFooter({ text: 'FFNexus • Garena BR' });
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('diario-last').setLabel('🕒 Últimas horas / Last hours').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('diario-today').setLabel('📅 Hoje / Today').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('diario-search').setLabel('🔍 Buscar / Search').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('diario-100').setLabel('🧾 100 últimas / Last 100').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('diario-last').setLabel(L.lastHours).setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('diario-today').setLabel(L.today).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('diario-search').setLabel(L.search).setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('diario-100').setLabel(L.last100).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('diario-cancel').setLabel(L.cancel).setStyle(ButtonStyle.Danger)
   );
 
@@ -181,17 +177,17 @@ async function handleDiarioCommand(interaction, channels, titulo, color, lang = 
 // ===============================================
 client.on('interactionCreate', async (interaction) => {
   try {
-    // Seleção de idioma (base)
     if (interaction.isChatInputCommand()) {
+      const L = LANGS.pt;
       const langSelect = new EmbedBuilder()
         .setColor(COLOR_PURPLE)
-        .setTitle('🗣️ Selecione o idioma / Select language')
-        .setDescription('🇧🇷 Português\n🇺🇸 English')
+        .setTitle(L.selectLang)
+        .setDescription(`${L.langPT}\n${L.langEN}`)
         .setFooter({ text: 'FFNexus • Garena BR' });
 
       const langRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('lang-pt').setLabel('🇧🇷 Português').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('lang-en').setLabel('🇺🇸 English').setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId('lang-pt').setLabel(L.langPT).setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('lang-en').setLabel(L.langEN).setStyle(ButtonStyle.Secondary)
       );
 
       await interaction.reply({ embeds: [langSelect], components: [langRow], ephemeral: true });
@@ -199,15 +195,14 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && (interaction.customId === 'lang-pt' || interaction.customId === 'lang-en')) {
       const lang = interaction.customId.split('-')[1];
+      const cmd = interaction.message.interaction?.commandName;
 
-      if (interaction.message.interaction?.commandName === 'feedback')
-        return handleFeedbackCommand(interaction, lang);
-      if (interaction.message.interaction?.commandName === 'doc')
-        return handleDocCommand(interaction, lang);
-      if (interaction.message.interaction?.commandName === 'diario_aprendiz')
-        return handleDiarioCommand(interaction, DIARIO_APRENDIZ_CHANNEL_IDS, 'Diário dos Aprendizes', COLOR_YELLOW, lang);
-      if (interaction.message.interaction?.commandName === 'diario_conselheiro')
-        return handleDiarioCommand(interaction, DIARIO_CONSELHEIRO_CHANNEL_IDS, 'Diário dos Conselheiros', COLOR_RED, lang);
+      if (cmd === 'feedback') return handleFeedbackCommand(interaction, lang);
+      if (cmd === 'doc') return handleDocCommand(interaction, lang);
+      if (cmd === 'diario_aprendiz')
+        return handleDiarioCommand(interaction, 'Diário dos Aprendizes', COLOR_YELLOW, lang);
+      if (cmd === 'diario_conselheiro')
+        return handleDiarioCommand(interaction, 'Diário dos Conselheiros', COLOR_RED, lang);
     }
 
   } catch (err) {
@@ -220,10 +215,10 @@ client.on('interactionCreate', async (interaction) => {
 // ===============================================
 async function registerCommands() {
   const commands = [
-    new SlashCommandBuilder().setName('feedback').setDescription('Gera relatório das últimas mensagens. / Generate feedback report.'),
-    new SlashCommandBuilder().setName('doc').setDescription('Busca documentos e gera resumo IA. / Search docs & AI summary.'),
-    new SlashCommandBuilder().setName('diario_aprendiz').setDescription('Gera relatório IA para aprendizes. / AI report for apprentices.'),
-    new SlashCommandBuilder().setName('diario_conselheiro').setDescription('Gera relatório IA para conselheiros. / AI report for mentors.')
+    new SlashCommandBuilder().setName('feedback').setDescription('Gera relatório das últimas mensagens.'),
+    new SlashCommandBuilder().setName('doc').setDescription('Busca documentos e gera resumo IA.'),
+    new SlashCommandBuilder().setName('diario_aprendiz').setDescription('Gera relatório IA para aprendizes.'),
+    new SlashCommandBuilder().setName('diario_conselheiro').setDescription('Gera relatório IA para conselheiros.')
   ].map(c => c.toJSON());
 
   const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -232,6 +227,11 @@ async function registerCommands() {
     console.log(`✅ Comandos atualizados no guild ${gid}`);
   }
 }
+
+// ===============================================
+// Keep-alive + Start
+// ===============================================
+setInterval(() => console.log('🟢 FFNexus ativo - ' + new Date().toLocaleString('pt-BR')), 30000);
 
 await registerCommands();
 await client.login(TOKEN);
