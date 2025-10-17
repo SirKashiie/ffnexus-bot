@@ -1,45 +1,36 @@
 import 'dotenv/config';
-import fs from 'fs';
-import fetch from 'node-fetch';
 import express from 'express';
+import fetch from 'node-fetch';
 import {
   Client, GatewayIntentBits, Partials,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   EmbedBuilder, StringSelectMenuBuilder
 } from 'discord.js';
 import { initStore } from './storage.js';
-import { loadKeywordsFromMCP, loadIncidentKeywordsFromMCP } from './filters.js';
-import { registerIngestion } from './ingest.js';
+import { loadKeywordsFromMCP } from './filters.js';
 import { registerAutoReportRoute } from './n8n.js';
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_IDS = (process.env.GUILD_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
-const DOCS_DIR = './data/docs';
-const COLOR_RED = 0xE53935, COLOR_YELLOW = 0xFBC02D, COLOR_PURPLE = 0x9C27B0;
 const N8N_REPORT_WEBHOOK_URL = process.env.N8N_REPORT_WEBHOOK_URL;
+const COLOR_RED = 0xE53935, COLOR_YELLOW = 0xFBC02D, COLOR_PURPLE = 0x9C27B0;
+
+const app = express();
+app.use(express.json());
+app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/', (req, res) => res.send('FFNexus HTTP OK'));
+const PORT = Number(process.env.PORT || 3000);
+app.listen(PORT, () => console.log(`HTTP up on ${PORT}`));
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
   partials: [Partials.Channel, Partials.Message, Partials.GuildMember],
 });
 
 await initStore();
 await loadKeywordsFromMCP();
-await loadIncidentKeywordsFromMCP();
 
 client.once('ready', () => console.log(`✅ Logado como ${client.user.tag}`));
-registerIngestion(client);
-
-const app = express();
-app.use(express.json());
-app.get('/health', (req, res) => res.json({ ok: true }));
 registerAutoReportRoute(app, client);
-app.listen(process.env.PORT || 3000, () => console.log('HTTP up'));
 
 const LANGS = {
   pt: {
@@ -88,7 +79,6 @@ function makeLangButtons(commandName) {
 }
 
 function feedbackSelectMenu(lang) {
-  const L = LANGS[lang];
   return new StringSelectMenuBuilder()
     .setCustomId('fb-time')
     .setPlaceholder(lang === 'pt' ? 'Selecione a janela de tempo' : 'Select time range')
@@ -112,55 +102,47 @@ client.on('interactionCreate', async (interaction) => {
         .setDescription(`${L.langPT}\n${L.langEN}`)
         .setFooter({ text: 'FFNexus • Garena BR' });
 
-      await interaction.reply({
-        embeds: [embed],
-        components: [makeLangButtons(cmdName)],
-        ephemeral: true
-      });
+      await interaction.reply({ embeds: [embed], components: [makeLangButtons(cmdName)], ephemeral: true });
       return;
     }
 
     if (interaction.isButton()) {
-      try {
-        const parts = interaction.customId.split('|');
-        const lang = parts[0] === 'lang-pt' ? 'pt' : 'en';
-        const cmd = parts[1] || null;
+      const parts = interaction.customId.split('|');
+      const lang = parts[0] === 'lang-pt' ? 'pt' : 'en';
+      const cmd = parts[1] || null;
 
-        if (cmd === 'feedback') {
-          const embed = new EmbedBuilder()
-            .setColor(COLOR_RED)
-            .setTitle(LANGS[lang].feedbackTitle)
-            .setDescription(LANGS[lang].feedbackDesc)
-            .setFooter({ text: 'FFNexus • Garena BR' });
+      if (cmd === 'feedback') {
+        const embed = new EmbedBuilder()
+          .setColor(COLOR_RED)
+          .setTitle(LANGS[lang].feedbackTitle)
+          .setDescription(LANGS[lang].feedbackDesc)
+          .setFooter({ text: 'FFNexus • Garena BR' });
 
-          await interaction.update({
-            embeds: [embed],
-            components: [new ActionRowBuilder().addComponents(feedbackSelectMenu(lang))]
-          });
-          return;
-        }
-
-        if (cmd === 'doc') {
-          const embed = new EmbedBuilder()
-            .setColor(COLOR_YELLOW)
-            .setTitle(LANGS[lang].docTitle)
-            .setDescription(`${LANGS[lang].docDesc}\n\n${LANGS[lang].searchDoc}\n${LANGS[lang].viewList}`)
-            .setFooter({ text: 'FFNexus • Garena BR' });
-
-          const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`doc-search|${lang}`).setLabel(LANGS[lang].searchDoc).setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId(`doc-list|${lang}`).setLabel(LANGS[lang].viewList).setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`doc-cancel|${lang}`).setLabel(LANGS[lang].cancel).setStyle(ButtonStyle.Danger)
-          );
-
-          await interaction.update({ embeds: [embed], components: [row] });
-          return;
-        }
-
-        await interaction.reply({ content: 'Opção selecionada.', ephemeral: true });
-      } catch {
-        if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: 'Erro ao processar botão.', ephemeral: true });
+        await interaction.update({
+          embeds: [embed],
+          components: [new ActionRowBuilder().addComponents(feedbackSelectMenu(lang))]
+        });
+        return;
       }
+
+      if (cmd === 'doc') {
+        const embed = new EmbedBuilder()
+          .setColor(COLOR_YELLOW)
+          .setTitle(LANGS[lang].docTitle)
+          .setDescription(`${LANGS[lang].docDesc}\n\n${LANGS[lang].searchDoc}\n${LANGS[lang].viewList}`)
+          .setFooter({ text: 'FFNexus • Garena BR' });
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`doc-search|${lang}`).setLabel(LANGS[lang].searchDoc).setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(`doc-list|${lang}`).setLabel(LANGS[lang].viewList).setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId(`doc-cancel|${lang}`).setLabel(LANGS[lang].cancel).setStyle(ButtonStyle.Danger)
+        );
+
+        await interaction.update({ embeds: [embed], components: [row] });
+        return;
+      }
+
+      await interaction.reply({ content: 'Opção selecionada.', ephemeral: true });
       return;
     }
 
@@ -188,13 +170,13 @@ client.on('interactionCreate', async (interaction) => {
       }
       return;
     }
-
   } catch {
-    try {
-      if (!interaction.replied) await interaction.reply({ content: '❌ Erro inesperado ao processar.', ephemeral: true });
-    } catch {}
+    try { if (!interaction.replied) await interaction.reply({ content: '❌ Erro inesperado ao processar.', ephemeral: true }); } catch {}
   }
 });
 
 setInterval(() => console.log('🟢 FFNexus ativo - ' + new Date().toLocaleString('pt-BR')), 30000);
-await client.login(TOKEN);
+client.login(TOKEN).catch(err => console.error('Discord login error:', err));
+
+process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));
+process.on('uncaughtException', (e) => console.error('uncaughtException', e));
