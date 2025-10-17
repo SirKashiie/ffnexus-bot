@@ -6,9 +6,10 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   EmbedBuilder, StringSelectMenuBuilder
 } from 'discord.js';
-import { initStore } from './storage.js';
-import { loadKeywordsFromMCP } from './filters.js';
+import { initStore, saveMessage } from './storage.js';
+import { loadKeywordsFromMCP, getNormalized, isRelevant } from './filters.js';
 import { registerAutoReportRoute } from './n8n.js';
+import { processRelevantMessageForAlerts } from './alerts.js';
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const N8N_REPORT_WEBHOOK_URL = process.env.N8N_REPORT_WEBHOOK_URL;
@@ -27,10 +28,14 @@ const client = new Client({
 });
 
 await initStore();
-await loadKeywordsFromMCP();
+let KEYWORDS = await loadKeywordsFromMCP();
 
 client.once('ready', () => console.log(`✅ Logado como ${client.user.tag}`));
 registerAutoReportRoute(app, client);
+
+setInterval(async () => {
+  try { KEYWORDS = await loadKeywordsFromMCP(); } catch {}
+}, 5 * 60 * 1000);
 
 const LANGS = {
   pt: {
@@ -175,8 +180,31 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
+client.on('messageCreate', async (msg) => {
+  try {
+    if (!msg.guild || msg.author?.bot || msg.system) return;
+    if (!msg.content && (!msg.attachments || msg.attachments.size === 0)) return;
+
+    const norm = getNormalized(msg.content || '');
+    const { ok } = isRelevant(norm, KEYWORDS);
+    if (!ok && (!msg.attachments || msg.attachments.size === 0)) return;
+
+    const row = {
+      id: msg.id,
+      authorId: msg.author.id,
+      authorTag: msg.author.tag,
+      channelId: msg.channelId,
+      guildId: msg.guildId,
+      content: msg.content?.trim() || '',
+      url: msg.url,
+      attachments: Array.from(msg.attachments?.values?.() || []).map(a => a.url),
+      createdAt: msg.createdTimestamp
+    };
+
+    await saveMessage(row);
+    await processRelevantMessageForAlerts(client, row, norm);
+  } catch {}
+});
+
 setInterval(() => console.log('🟢 FFNexus ativo - ' + new Date().toLocaleString('pt-BR')), 30000);
 client.login(TOKEN).catch(err => console.error('Discord login error:', err));
-
-process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));
-process.on('uncaughtException', (e) => console.error('uncaughtException', e));
