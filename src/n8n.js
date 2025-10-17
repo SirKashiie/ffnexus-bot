@@ -1,4 +1,3 @@
-// src/n8n.js
 const REPORT_URL = (process.env.N8N_REPORT_WEBHOOK_URL || '').trim();
 const DOC_URL = (process.env.N8N_DOC_WEBHOOK_URL || '').trim();
 
@@ -162,7 +161,7 @@ export async function summarizeDocsWithN8n({ files = [], lang = 'pt' } = {}) {
   }
 }
 
-import { findMessages } from './storage.js';
+import { findMessages, pruneOlderThan } from './storage.js';
 
 export function registerAutoReportRoute(app, client) {
   app.post('/ffnexus/auto-report', async (req, res) => {
@@ -217,6 +216,8 @@ export function registerAutoReportRoute(app, client) {
           }
         } catch {}
       }
+
+      await pruneOlderThan(24 * 60 * 60 * 1000);
 
       res.json({ ok: true, count: rows.length, hours });
     } catch (e) {

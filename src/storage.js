@@ -1,31 +1,18 @@
-// src/storage.js
 import fs from 'fs';
 import * as fsp from 'fs/promises';
 import path from 'path';
 
 const DATA_DIR = './data';
 const FILE = path.join(DATA_DIR, 'messages.jsonl');
-const ALERTS_FILE = path.join(DATA_DIR, 'alerts.jsonl');
 
 export async function initStore() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(FILE)) fs.writeFileSync(FILE, '', 'utf-8');
-  if (!fs.existsSync(ALERTS_FILE)) fs.writeFileSync(ALERTS_FILE, '', 'utf-8');
 }
 
 export async function saveMessage(obj) {
   const line = JSON.stringify(obj) + '\n';
   await fsp.appendFile(FILE, line, 'utf-8');
-}
-
-export async function storeMessage(obj) {
-  await saveMessage(obj);
-}
-
-export async function saveAlert(obj) {
-  const payload = { ...obj, createdAt: obj.createdAt ?? Date.now() };
-  const line = JSON.stringify(payload) + '\n';
-  await fsp.appendFile(ALERTS_FILE, line, 'utf-8');
 }
 
 export async function findMessages({ fromMs }) {
@@ -45,5 +32,31 @@ export async function findMessages({ fromMs }) {
     return out;
   } catch {
     return out;
+  }
+}
+
+export async function pruneOlderThan(msAge) {
+  const cutoff = Date.now() - msAge;
+  try {
+    const txt = await fsp.readFile(FILE, 'utf-8');
+    if (!txt) return { kept: 0, pruned: 0 };
+    const lines = txt.split(/\r?\n/);
+    const kept = [];
+    let pruned = 0;
+    for (const raw of lines) {
+      const t = raw.trim();
+      if (!t) continue;
+      try {
+        const obj = JSON.parse(t);
+        if (obj.createdAt >= cutoff) kept.push(JSON.stringify(obj));
+        else pruned++;
+      } catch {
+        pruned++;
+      }
+    }
+    await fsp.writeFile(FILE, kept.length ? kept.join('\n') + '\n' : '', 'utf-8');
+    return { kept: kept.length, pruned };
+  } catch {
+    return { kept: 0, pruned: 0 };
   }
 }
