@@ -1,20 +1,31 @@
 // src/storage.js
-// Armazenamento em JSONL (sem módulos nativos). Cada linha é um JSON de uma mensagem.
 import fs from 'fs';
 import * as fsp from 'fs/promises';
 import path from 'path';
 
 const DATA_DIR = './data';
 const FILE = path.join(DATA_DIR, 'messages.jsonl');
+const ALERTS_FILE = path.join(DATA_DIR, 'alerts.jsonl');
 
 export async function initStore() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(FILE)) fs.writeFileSync(FILE, '', 'utf-8');
+  if (!fs.existsSync(ALERTS_FILE)) fs.writeFileSync(ALERTS_FILE, '', 'utf-8');
 }
 
 export async function saveMessage(obj) {
   const line = JSON.stringify(obj) + '\n';
   await fsp.appendFile(FILE, line, 'utf-8');
+}
+
+export async function storeMessage(obj) {
+  await saveMessage(obj);
+}
+
+export async function saveAlert(obj) {
+  const payload = { ...obj, createdAt: obj.createdAt ?? Date.now() };
+  const line = JSON.stringify(payload) + '\n';
+  await fsp.appendFile(ALERTS_FILE, line, 'utf-8');
 }
 
 export async function findMessages({ fromMs }) {
@@ -28,13 +39,11 @@ export async function findMessages({ fromMs }) {
       try {
         const obj = JSON.parse(t);
         if (!fromMs || obj.createdAt >= fromMs) out.push(obj);
-      } catch {
-        // ignora linhas quebradas
-      }
+      } catch {}
     }
     out.sort((a, b) => a.createdAt - b.createdAt);
     return out;
   } catch {
-    return out; // se o arquivo não existir/erro de leitura, retorna vazio
+    return out;
   }
 }

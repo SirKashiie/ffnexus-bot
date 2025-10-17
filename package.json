@@ -21,6 +21,7 @@
     "dayjs": "^1.11.11",
     "discord.js": "^14.18.0",
     "dotenv": "^16.4.5",
+    "express": "^5.1.0",
     "googleapis": "^160.0.0",
     "mime-types": "^3.0.1",
     "minisearch": "^7.2.0",

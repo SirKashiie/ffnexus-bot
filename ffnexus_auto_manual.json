@@ -1,0 +1,151 @@
+{
+  "name": "FFNexus Unified Summary (auto + manual)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "report-handler",
+        "options": {}
+      },
+      "id": "Webhook Trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json[\"tipo\"]}}",
+              "operation": "equal",
+              "value2": "auto"
+            }
+          ]
+        }
+      },
+      "id": "IF tipo == auto",
+      "name": "IF tipo == auto",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [540, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "headerAuth",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "headerAuthName": "Authorization",
+        "headerAuthValue": "Bearer GROQ_API_KEY",
+        "method": "POST",
+        "sendBody": true,
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={\"model\":\"llama-3-70b-versatile\",\"messages\":[{\"role\":\"system\",\"content\":\"Você é um analista de comunidade do Free Fire. Resuma as mensagens em tópicos principais, separando tendências, reclamações e sugestões.\"},{\"role\":\"user\",\"content\": $json[\"mensagens\"].map(m => `${m.author}: ${m.content}`).join(\"\\n\")}]}",
+        "responseFormat": "json"
+      },
+      "id": "Groq Auto Summary",
+      "name": "Groq Auto Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [760, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ content: '🕒 **Resumo Automático (últimas 12h)**\\n' + $json.choices[0].message.content }];"
+      },
+      "id": "Code Auto Format",
+      "name": "Code Auto Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 180]
+    },
+    {
+      "parameters": {
+        "url": "YOUR_DISCORD_WEBHOOK_URL",
+        "method": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\"content\": $json[\"content\"]}"
+      },
+      "id": "Send Auto to Discord",
+      "name": "Send Auto to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1200, 180]
+    },
+    {
+      "parameters": {
+        "authentication": "headerAuth",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "headerAuthName": "Authorization",
+        "headerAuthValue": "Bearer GROQ_API_KEY",
+        "method": "POST",
+        "sendBody": true,
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={\"model\":\"llama-3-70b-versatile\",\"messages\":[{\"role\":\"system\",\"content\":\"Você é um analista de comunidade do Free Fire. Gere um relatório completo e estruturado com seções de resumo geral, tópicos recorrentes, tendências positivas e pontos de atenção.\"},{\"role\":\"user\",\"content\": $json[\"mensagens\"].map(m => `${m.author}: ${m.content}`).join(\"\\n\")}]}",
+        "responseFormat": "json"
+      },
+      "id": "Groq Manual Summary",
+      "name": "Groq Manual Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [760, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ content: '🧠 **Relatório Manual — Feedback Free Fire BR**\\n\\n' + $json.choices[0].message.content }];"
+      },
+      "id": "Code Manual Format",
+      "name": "Code Manual Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 420]
+    },
+    {
+      "parameters": {
+        "url": "YOUR_DISCORD_WEBHOOK_URL",
+        "method": "POST",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\"content\": $json[\"content\"]}"
+      },
+      "id": "Send Manual to Discord",
+      "name": "Send Manual to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1200, 420]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{ "node": "IF tipo == auto", "type": "main", "index": 0 }]]
+    },
+    "IF tipo == auto": {
+      "main": [
+        [{ "node": "Groq Auto Summary", "type": "main", "index": 0 }],
+        [{ "node": "Groq Manual Summary", "type": "main", "index": 0 }]
+      ]
+    },
+    "Groq Auto Summary": {
+      "main": [[{ "node": "Code Auto Format", "type": "main", "index": 0 }]]
+    },
+    "Code Auto Format": {
+      "main": [[{ "node": "Send Auto to Discord", "type": "main", "index": 0 }]]
+    },
+    "Groq Manual Summary": {
+      "main": [[{ "node": "Code Manual Format", "type": "main", "index": 0 }]]
+    },
+    "Code Manual Format": {
+      "main": [[{ "node": "Send Manual to Discord", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": false,
+    "saveDataErrorExecution": "all"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "1.0.1"
+}

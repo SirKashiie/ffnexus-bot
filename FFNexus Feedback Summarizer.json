@@ -1,0 +1,86 @@
+{
+  "name": "FFNexus Feedback Summarizer",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "ffnexus-feedback",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookDescription": "Recebe dados do FFNexus via POST"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "temperature": 0.6,
+        "maxTokens": 1000,
+        "messages": [
+          {
+            "role": "system",
+            "content": "Você é um analista de comunidade da Garena especializado em Free Fire Brasil. Sua função é gerar relatórios objetivos e estruturados a partir de mensagens enviadas pela comunidade. Analise o conteúdo fornecido e retorne o resultado no formato abaixo, em português:\n\n⭐ **Resumo geral**\n🧩 **Tópicos recorrentes**\n📈 **Tendências positivas**\n⚠️ **Pontos de atenção**\n💡 **Sugestões da comunidade**"
+          },
+          {
+            "role": "user",
+            "content": "Analise as mensagens a seguir e produza um resumo objetivo:\n\n{{$json.messages}}"
+          }
+        ]
+      },
+      "id": "2",
+      "name": "Generate Summary (OpenAI)",
+      "type": "n8n-nodes-base.openAiChat",
+      "typeVersion": 1,
+      "position": [600, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "OpenAI-Default",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "webhookUri": "https://discord.com/api/webhooks/SEU_WEBHOOK_AQUI",
+        "options": {},
+        "bodyParametersJson": "{\n  \"content\": \"📋 **Relatório FFNexus — {{ $json[\"body\"][\"guild\"] }}**\\n👤 Solicitado por: {{ $json[\"body\"][\"user\"] }}\\n🕓 Período: {{ $json[\"body\"][\"timeRange\"] / 3600000 }}h\\n\\n🧠 **Resumo IA:**\\n{{ $json[\"data\"][0][\"content\"] }}\"\n}"
+      },
+      "id": "3",
+      "name": "Send to Discord",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [950, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Generate Summary (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Summary (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Send to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "tags": ["ffnexus", "garena", "feedback", "openai"]
+}
