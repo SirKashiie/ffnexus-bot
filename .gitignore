@@ -1,0 +1,5 @@
+﻿.env
+.env.*
+node_modules/
+src/data/*.jsonl
+*.log
