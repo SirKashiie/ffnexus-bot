@@ -210,7 +210,9 @@ export function registerAutoReportRoute(app, client) {
         try {
           const ch = await client.channels.fetch(channelId);
           if (ch && ch.send) {
-            const head = lang === 'en' ? `🧾 Auto summary (last ${hours}h)` : `🧾 Resumo das últimas ${hours}h`;
+            const head = lang === 'en'
+              ? `Summary of the last ${hours} hours - Free Fire BR feedback`
+              : `Resumo das últimas ${hours} horas - Feedback Free Fire BR`;
             await ch.send(`${head}\n\n${summaryText}`.slice(0, 1900));
           }
         } catch {}
