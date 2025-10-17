@@ -1,5 +1,4 @@
 // src/n8n.js
-// Node 20+ já tem fetch global
 const REPORT_URL = (process.env.N8N_REPORT_WEBHOOK_URL || '').trim();
 const DOC_URL = (process.env.N8N_DOC_WEBHOOK_URL || '').trim();
 
@@ -15,53 +14,83 @@ async function safeFetch(url, options = {}, timeoutMs = 8000) {
   }
 }
 
-function fallbackFeedbackSummary(messages = [], lang = 'pt') {
-  const T =
+function buildNarrativeSummary(rows = [], lang = 'pt', hours = 12, timezone = process.env.TIMEZONE || 'America/Sao_Paulo') {
+  const fmt = (ts) =>
+    new Date(ts || Date.now()).toLocaleTimeString(lang === 'en' ? 'en-US' : 'pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: timezone,
+    });
+
+  const items = rows.map((r) => ({
+    text: String(r?.content || '').toLowerCase(),
+    at: Number(r?.createdAt || Date.now()),
+  }));
+
+  const THEMES = [
+    { key: 'login', pt: 'problemas de login/conexão', en: 'login/connection issues', kw: ['login', 'logar', 'entrar', 'conectar', 'conexao', 'conexão', 'servidor', 'auth'] },
+    { key: 'lag', pt: 'lag/ping', en: 'lag/ping', kw: ['lag', 'ping', 'latencia', 'latência', 'travando', 'travou', 'delay'] },
+    { key: 'bugs', pt: 'bugs/erros', en: 'bugs/errors', kw: ['bug', 'erro', 'error', 'crash', 'falha'] },
+    { key: 'price', pt: 'preço', en: 'price', kw: ['preço', 'preco', 'price', 'caro', 'barato', 'caríssimo', 'carissima'] },
+    { key: 'pass', pt: 'Passe Booyah', en: 'Booyah Pass', kw: ['booyah', 'passe booyah', 'booyapass', 'passe'] },
+    { key: 'praise', pt: 'elogios', en: 'praise', kw: ['bom', 'ótimo', 'otimo', 'excelente', 'curti', 'gostei', 'amazing', 'thanks'] },
+  ];
+
+  const stat = new Map();
+  const times = new Map();
+  for (const t of THEMES) {
+    stat.set(t.key, 0);
+    times.set(t.key, []);
+  }
+
+  for (const it of items) {
+    for (const t of THEMES) {
+      if (t.kw.some((k) => it.text.includes(k))) {
+        stat.set(t.key, stat.get(t.key) + 1);
+        if (times.get(t.key).length < 3) times.get(t.key).push(fmt(it.at));
+      }
+    }
+  }
+
+  const total = items.length;
+  const topics = THEMES
+    .filter((t) => t.key !== 'praise')
+    .map((t) => ({ key: t.key, label: lang === 'en' ? t.en : t.pt, count: stat.get(t.key) }))
+    .filter((x) => x.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+
+  const praise = stat.get('praise') || 0;
+
+  if (topics.length === 0) {
+    return lang === 'en'
+      ? `No relevant feedback was found in the last ${hours}h.`
+      : `Não encontramos feedback relevante nas últimas ${hours}h.`;
+  }
+
+  const lead =
     lang === 'en'
-      ? {
-          header: (n) => `Fallback summary: ${n} messages analyzed.`,
-          bugs: 'Bugs/errors',
-          lag: 'Lag/ping',
-          price: 'Price',
-          pass: 'Booyah pass',
-          praise: 'Praise',
-        }
-      : {
-          header: (n) => `Resumo (fallback): ${n} mensagens analisadas.`,
-          bugs: 'Bugs/erros',
-          lag: 'Lag/ping',
-          price: 'Preço',
-          pass: 'Passe Booyah',
-          praise: 'Elogios',
-        };
+      ? `In the last ${hours}h we analyzed ${total} messages. The most cited topics were `
+      : `Nas últimas ${hours}h analisamos ${total} mensagens. Os temas mais citados foram `;
 
-  const texts = messages.map((m) => String(m?.content || '').toLowerCase());
-  const count = (keys) => texts.filter((s) => keys.some((k) => s.includes(k))).length;
+  const list = topics
+    .map((t, i) => {
+      const ts = times.get(t.key);
+      const hint =
+        ts.length > 0 ? (lang === 'en' ? ` peaks around ${ts.join(', ')}` : ` picos por volta de ${ts.join(', ')}`) : '';
+      return `${i === 0 ? '' : i === topics.length - 1 ? (lang === 'en' ? ' and ' : ' e ') : ', '}${t.label} (${t.count})${hint}`;
+    })
+    .join('');
 
-  const bugs = count(['bug', 'erro', 'error', 'crash', 'travou']);
-  const lag = count(['lag', 'ping', 'latencia', 'latência', 'atraso']);
-  const price = count(['preço', 'preco', 'price', 'caro', 'barato']);
-  const pass = count(['booyah', 'passe booyah', 'booyapass']);
-  const praise = count(['bom', 'ótimo', 'otimo', 'excelente', 'curti', 'gostei', 'amazing', 'thanks']);
+  const tail = praise > 0 ? (lang === 'en' ? `. We also saw ${praise} positive comments.` : `. Também registramos ${praise} elogios.`) : '';
 
-  return [
-    T.header(messages.length),
-    `• ${T.bugs}: ${bugs}`,
-    `• ${T.lag}: ${lag}`,
-    `• ${T.price}: ${price}`,
-    `• ${T.pass}: ${pass}`,
-    `• ${T.praise}: ${praise}`,
-  ].join('\n');
+  return lead + list + tail;
 }
 
-export async function summarizeWithN8n({
-  timeframeMs,
-  timezone,
-  preview = false,
-  messages = [],
-  lang = 'pt',
-} = {}) {
-  if (!REPORT_URL) return fallbackFeedbackSummary(messages, lang);
+export async function summarizeWithN8n({ timeframeMs, timezone, preview = false, messages = [], lang = 'pt' } = {}) {
+  if (!REPORT_URL) {
+    return buildNarrativeSummary(messages, lang, Math.round((timeframeMs || 0) / 3600000) || 12, timezone);
+  }
 
   try {
     const res = await safeFetch(REPORT_URL, {
@@ -83,17 +112,20 @@ export async function summarizeWithN8n({
       }),
     });
 
-    if (!res) return fallbackFeedbackSummary(messages, lang);
+    if (!res) return buildNarrativeSummary(messages, lang, Math.round((timeframeMs || 0) / 3600000) || 12, timezone);
     const text = await res.text();
-    if (!res.ok) return fallbackFeedbackSummary(messages, lang);
+    if (!res.ok) return buildNarrativeSummary(messages, lang, Math.round((timeframeMs || 0) / 3600000) || 12, timezone);
+
     try {
       const json = JSON.parse(text);
-      return json?.summary || String(text || '').trim() || fallbackFeedbackSummary(messages, lang);
+      const out = json?.summary || String(text || '').trim();
+      return out || buildNarrativeSummary(messages, lang, Math.round((timeframeMs || 0) / 3600000) || 12, timezone);
     } catch {
-      return String(text || '').trim() || fallbackFeedbackSummary(messages, lang);
+      const out = String(text || '').trim();
+      return out || buildNarrativeSummary(messages, lang, Math.round((timeframeMs || 0) / 3600000) || 12, timezone);
     }
   } catch {
-    return fallbackFeedbackSummary(messages, lang);
+    return buildNarrativeSummary(messages, lang, Math.round((timeframeMs || 0) / 3600000) || 12, timezone);
   }
 }
 
@@ -118,6 +150,7 @@ export async function summarizeDocsWithN8n({ files = [], lang = 'pt' } = {}) {
     if (!res) return null;
     const text = await res.text();
     if (!res.ok) return null;
+
     try {
       const json = JSON.parse(text);
       return json?.summary || String(text || '').trim() || null;
@@ -165,27 +198,22 @@ export function registerAutoReportRoute(app, client) {
               summaryText = t || '';
             }
           }
-        } catch {
-          // mantém vazio para cair no fallback
-        }
+        } catch {}
       }
 
-      if (!summaryText) summaryText = fallbackFeedbackSummary(rows, lang);
+      if (!summaryText) {
+        summaryText = buildNarrativeSummary(rows, lang, hours, timezone);
+      }
 
       const channelId = process.env.AUTO_REPORT_CHANNEL_ID || process.env.DEST_CHANNEL_ID;
       if (client && channelId) {
         try {
           const ch = await client.channels.fetch(channelId);
           if (ch && ch.send) {
-            const head =
-              lang === 'en'
-                ? `🧾 Auto feedback report (last ${hours}h)`
-                : `🧾 Relatório automático (últimas ${hours}h)`;
+            const head = lang === 'en' ? `🧾 Auto summary (last ${hours}h)` : `🧾 Resumo das últimas ${hours}h`;
             await ch.send(`${head}\n\n${summaryText}`.slice(0, 1900));
           }
-        } catch {
-          // ignora erro de envio
-        }
+        } catch {}
       }
 
       res.json({ ok: true, count: rows.length, hours });
